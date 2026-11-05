@@ -8,7 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.SoundEffectConstants
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -65,13 +64,19 @@ class KeyboardService : InputMethodService() {
         )
     )
 
+    override fun onCreate() {
+        super.onCreate()
+        KeyboardSound.initialize(this)
+    }
+
     override fun onDestroy() {
         preview?.dismiss()
+        handler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
     private fun playClick(view: View) {
-        view.playSoundEffect(SoundEffectConstants.CLICK)
+        KeyboardSound.play(this)
     }
 
     override fun onCreateInputView(): View = buildKeyboard()
@@ -188,97 +193,89 @@ class KeyboardService : InputMethodService() {
             }
             face.addView(fleck, FrameLayout.LayoutParams(-1, -1))
         }
-        var longHandled = false
-        var touchDispatched = false
-        var activePointerId = MotionEvent.INVALID_POINTER_ID
-        var fallbackAction: Runnable? = null
-        val alternateKey = tense[key] ?: shiftedMedials[key]
-        val supportsLongPress = alternateKey != null && !english && !symbols
-        val longAction = Runnable {
-            if (activePointerId != MotionEvent.INVALID_POINTER_ID && !touchDispatched && supportsLongPress) {
-                touchDispatched = true
-                longHandled = true
-                playClick(face)
-                onKeyPressed(alternateKey!!)
-                showPreview(face, alternateKey)
-            }
+        class PressSession(val pointerId: Int) {
+            var dispatched = false
+            var longHandled = false
+            var fallback: Runnable? = null
+            var longPress: Runnable? = null
         }
+        var activeSession: PressSession? = null
+
         fun restoreKeyFace(view: View) {
             view.animate().cancel()
-            view.animate()
-                .scaleX(1f).scaleY(1f)
-                .translationY(0f)
-                .setDuration(95)
-                .start()
+            view.animate().scaleX(1f).scaleY(1f).translationY(0f).setDuration(90).start()
         }
-        fun dispatchBaseOnce(view: View) {
-            if (!touchDispatched) {
-                touchDispatched = true
-                playClick(view)
-                onKeyPressed(key)
-            }
+        fun dispatchOnce(session: PressSession, view: View, value: String) {
+            if (session.dispatched) return
+            session.dispatched = true
+            session.fallback?.let { handler.removeCallbacks(it) }
+            session.longPress?.let { handler.removeCallbacks(it) }
+            playClick(view)
+            onKeyPressed(value)
+            if (value != key) showPreview(view, value)
         }
-        fun clearTouch(view: View) {
-            handler.removeCallbacks(longAction)
-            fallbackAction?.let { handler.removeCallbacks(it) }
-            fallbackAction = null
+        fun clearSession(session: PressSession, view: View) {
+            session.fallback?.let { handler.removeCallbacks(it) }
+            session.longPress?.let { handler.removeCallbacks(it) }
+            if (activeSession === session) activeSession = null
             hidePreview()
             restoreKeyFace(view)
-            activePointerId = MotionEvent.INVALID_POINTER_ID
             view.parent?.requestDisallowInterceptTouchEvent(false)
         }
+
         face.setOnTouchListener { view, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    handler.removeCallbacks(longAction)
-                    fallbackAction?.let { handler.removeCallbacks(it) }
-                    activePointerId = event.getPointerId(0)
-                    longHandled = false
-                    touchDispatched = false
+                    activeSession?.let { previous ->
+                        if (!previous.dispatched && !previous.longHandled) dispatchOnce(previous, view, key)
+                        clearSession(previous, view)
+                    }
+                    val session = PressSession(event.getPointerId(0))
+                    activeSession = session
                     view.parent?.requestDisallowInterceptTouchEvent(true)
                     view.animate().cancel()
-                    view.animate()
-                        .scaleX(0.94f).scaleY(0.94f)
-                        .translationY(dp(1).toFloat())
-                        .setDuration(65)
-                        .start()
-                    fallbackAction = Runnable {
-                        if (activePointerId != MotionEvent.INVALID_POINTER_ID && !touchDispatched) {
-                            dispatchBaseOnce(view)
-                        }
+                    view.animate().scaleX(0.94f).scaleY(0.94f)
+                        .translationY(dp(1).toFloat()).setDuration(55).start()
+
+                    session.fallback = Runnable {
+                        if (activeSession === session && !session.dispatched) dispatchOnce(session, view, key)
                     }
-                    handler.postDelayed(fallbackAction!!, if (supportsLongPress) 470L else 90L)
-                    if (supportsLongPress) handler.postDelayed(longAction, 430L)
+                    handler.postDelayed(session.fallback!!, if (supportsLongPress) 520L else 55L)
+
+                    if (supportsLongPress) {
+                        session.longPress = Runnable {
+                            if (activeSession === session && !session.dispatched) {
+                                session.longHandled = true
+                                dispatchOnce(session, view, alternateKey!!)
+                            }
+                        }
+                        handler.postDelayed(session.longPress!!, 430L)
+                    }
                     true
                 }
-                MotionEvent.ACTION_MOVE -> {
-                    // Keep the original key captured while the finger is down; parent rows must not steal the gesture.
-                    true
-                }
+                MotionEvent.ACTION_MOVE -> true
                 MotionEvent.ACTION_POINTER_DOWN -> true
                 MotionEvent.ACTION_POINTER_UP -> {
-                    if (event.getPointerId(event.actionIndex) == activePointerId) {
-                        if (!touchDispatched && !longHandled) dispatchBaseOnce(view)
-                        clearTouch(view)
+                    val session = activeSession
+                    if (session != null && event.getPointerId(event.actionIndex) == session.pointerId) {
+                        if (!session.dispatched && !session.longHandled) dispatchOnce(session, view, key)
+                        clearSession(session, view)
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    val pointerIndex = event.findPointerIndex(activePointerId)
-                    val slop = dp(18).toFloat()
-                    val inside = pointerIndex >= 0 &&
-                        event.getX(pointerIndex) >= -slop && event.getY(pointerIndex) >= -slop &&
-                        event.getX(pointerIndex) <= view.width + slop &&
-                        event.getY(pointerIndex) <= view.height + slop
-                    if (inside && !touchDispatched && !longHandled) dispatchBaseOnce(view)
-                    clearTouch(view)
+                    val session = activeSession
+                    if (session != null) {
+                        if (!session.dispatched && !session.longHandled) dispatchOnce(session, view, key)
+                        clearSession(session, view)
+                    } else restoreKeyFace(view)
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    // A cancelled UP must not silently eat a key tap.
-                    if (activePointerId != MotionEvent.INVALID_POINTER_ID && !touchDispatched && !longHandled)
-                        dispatchBaseOnce(view)
-                    clearTouch(view)
+                    activeSession?.let { session ->
+                        if (!session.dispatched && !session.longHandled) dispatchOnce(session, view, key)
+                        clearSession(session, view)
+                    }
                     true
                 }
                 else -> true
