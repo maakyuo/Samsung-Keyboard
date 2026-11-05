@@ -15,6 +15,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
+import java.util.ArrayDeque
 import kotlin.math.roundToInt
 
 class KeyboardService : InputMethodService() {
@@ -27,6 +28,8 @@ class KeyboardService : InputMethodService() {
     private var t = 0
     private val handler = Handler(Looper.getMainLooper())
     private var preview: PopupWindow? = null
+    private val pendingKeys = ArrayDeque<String>()
+    private var drainingKeys = false
 
     private val initials = listOf("ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ")
     private val medials = listOf("ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ")
@@ -67,6 +70,11 @@ class KeyboardService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         KeyboardSound.initialize(this)
+    }
+
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInputView(info, restarting)
+        drainPendingKeys()
     }
 
     override fun onDestroy() {
@@ -198,7 +206,6 @@ class KeyboardService : InputMethodService() {
         class PressSession(val pointerId: Int) {
             var dispatched = false
             var longHandled = false
-            var fallback: Runnable? = null
             var longPress: Runnable? = null
         }
         var activeSession: PressSession? = null
@@ -210,14 +217,12 @@ class KeyboardService : InputMethodService() {
         fun dispatchOnce(session: PressSession, view: View, value: String) {
             if (session.dispatched) return
             session.dispatched = true
-            session.fallback?.let { handler.removeCallbacks(it) }
             session.longPress?.let { handler.removeCallbacks(it) }
             playClick(view)
             onKeyPressed(value)
             if (value != key) showPreview(view, value)
         }
         fun clearSession(session: PressSession, view: View) {
-            session.fallback?.let { handler.removeCallbacks(it) }
             session.longPress?.let { handler.removeCallbacks(it) }
             if (activeSession === session) activeSession = null
             hidePreview()
@@ -238,11 +243,6 @@ class KeyboardService : InputMethodService() {
                     view.animate().cancel()
                     view.animate().scaleX(0.78f).scaleY(0.78f)
                         .translationY(dp(4).toFloat()).setDuration(45).start()
-
-                    session.fallback = Runnable {
-                        if (activeSession === session && !session.dispatched) dispatchOnce(session, view, key)
-                    }
-                    handler.postDelayed(session.fallback!!, if (supportsLongPress) 520L else 55L)
 
                     if (supportsLongPress) {
                         session.longPress = Runnable {
@@ -274,10 +274,8 @@ class KeyboardService : InputMethodService() {
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    activeSession?.let { session ->
-                        if (!session.dispatched && !session.longHandled) dispatchOnce(session, view, key)
-                        clearSession(session, view)
-                    }
+                    activeSession?.let { session -> clearSession(session, view) }
+                    restoreKeyFace(view)
                     true
                 }
                 else -> true
@@ -313,11 +311,26 @@ class KeyboardService : InputMethodService() {
             setStroke(dp(strokeWidth), stroke)
         }
 
-    private fun onKeyPressed(key: String, attempt: Int = 0) {
-        val ic = currentInputConnection ?: run {
-            if (attempt < 12) handler.postDelayed({ onKeyPressed(key, attempt + 1) }, 40L)
-            return
+    private fun onKeyPressed(key: String) {
+        pendingKeys.addLast(key)
+        drainPendingKeys()
+    }
+
+    private fun drainPendingKeys() {
+        if (drainingKeys) return
+        val ic = currentInputConnection ?: return
+        drainingKeys = true
+        try {
+            while (pendingKeys.isNotEmpty()) {
+                val next = pendingKeys.removeFirst()
+                processKey(next, ic)
+            }
+        } finally {
+            drainingKeys = false
         }
+    }
+
+    private fun processKey(key: String, ic: InputConnection) {
         when {
             key == "⇧" -> {
                 if (symbols) symbolPage = (symbolPage + 1) % symbolPages.size else shifted = !shifted
@@ -338,7 +351,7 @@ class KeyboardService : InputMethodService() {
                 finishComposition(ic)
                 val action = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
                 if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED)
-                    ic.performEditorAction(action) else ic.commitText("\\n", 1)
+                    ic.performEditorAction(action) else ic.commitText("\n", 1)
             }
             key == "," -> { finishComposition(ic); ic.commitText(",", 1) }
             key == "." -> { finishComposition(ic); ic.commitText(".", 1) }
@@ -355,7 +368,6 @@ class KeyboardService : InputMethodService() {
             }
         }
     }
-
     private fun typeJamo(char: String, ic: InputConnection) {
         if (char in medials) { addVowel(char, ic); return }
         if (char in initials) { addConsonant(char, ic); return }
