@@ -193,6 +193,8 @@ class KeyboardService : InputMethodService() {
             }
             face.addView(fleck, FrameLayout.LayoutParams(-1, -1))
         }
+        val alternateKey = tense[key] ?: shiftedMedials[key]
+        val supportsLongPress = alternateKey != null && !english && !symbols
         class PressSession(val pointerId: Int) {
             var dispatched = false
             var longHandled = false
