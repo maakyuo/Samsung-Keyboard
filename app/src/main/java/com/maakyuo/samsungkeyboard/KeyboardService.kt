@@ -51,6 +51,7 @@ class KeyboardService : InputMethodService() {
     private val vowelJoin = mapOf("ㅗㅏ" to "ㅘ","ㅗㅐ" to "ㅙ","ㅗㅣ" to "ㅚ","ㅜㅓ" to "ㅝ","ㅜㅔ" to "ㅞ","ㅜㅣ" to "ㅟ","ㅡㅣ" to "ㅢ")
     private val finalJoin = mapOf("ㄱㅅ" to "ㄳ","ㄴㅈ" to "ㄵ","ㄴㅎ" to "ㄶ","ㄹㄱ" to "ㄺ","ㄹㅁ" to "ㄻ","ㄹㅂ" to "ㄼ","ㄹㅅ" to "ㄽ","ㄹㅌ" to "ㄾ","ㄹㅍ" to "ㄿ","ㄹㅎ" to "ㅀ","ㅂㅅ" to "ㅄ")
     private val tense = mapOf("ㄱ" to "ㄲ","ㄷ" to "ㄸ","ㅂ" to "ㅃ","ㅅ" to "ㅆ","ㅈ" to "ㅉ")
+    private val shiftedMedials = mapOf("ㅐ" to "ㅒ","ㅔ" to "ㅖ")
     private val numberRow = listOf("1","2","3","4","5","6","7","8","9","0")
     private val koreanRows = listOf(
         listOf("ㅂ","ㅈ","ㄷ","ㄱ","ㅅ","ㅛ","ㅕ","ㅑ","ㅐ","ㅔ"),
@@ -189,7 +190,7 @@ class KeyboardService : InputMethodService() {
                 }
                 root.addView(empty, LinearLayout.LayoutParams(-1, 0, 1f))
             } else {
-                clipboardHistory.take(4).forEachIndexed { index, value ->
+                clipboardHistory.take(3).forEachIndexed { index, value ->
                     val item = makeKey("clip:$index", false, 0, index)
                     root.addView(item, LinearLayout.LayoutParams(-1, 0, 1f).apply {
                         setMargins(dp(3), dp(2), dp(3), dp(2))
@@ -245,8 +246,12 @@ class KeyboardService : InputMethodService() {
         val dark = modifier || key in listOf("🔫","🐰")
         val label = when (key) {
             "space" -> if (english) "English" else "한글"
-            "⇧" -> if (shifted) "⇪" else "⇧"
-            else -> if (key.startsWith("clip:")) clipboardHistory.getOrNull(key.substringAfter(":").toIntOrNull() ?: -1)?.take(34) ?: "" else key.trim()
+            "⇧" -> "⇧"
+            else -> if (key.startsWith("clip:")) {
+                clipboardHistory.getOrNull(key.substringAfter(":").toIntOrNull() ?: -1)?.take(34) ?: ""
+            } else if (shifted && !english && !symbols) {
+                (tense[key] ?: shiftedMedials[key] ?: key).trim()
+            } else key.trim()
         }
         val face = FrameLayout(this).apply {
             isClickable = true
@@ -262,7 +267,13 @@ class KeyboardService : InputMethodService() {
         val text = TextView(this).apply {
             this.text = label
             gravity = Gravity.CENTER
-            textSize = when (key) { "space" -> 10f; "?123","한/영","가나다" -> 11f; else -> if (key.matches(Regex("[1-3]/3"))) 13f else 17f }
+            textSize = when {
+                key.startsWith("clip:") -> 21f
+                key == "space" -> 10f
+                key in listOf("?123","한/영","가나다") -> 11f
+                key.matches(Regex("[1-3]/3")) -> 13f
+                else -> 17f
+            }
             setTextColor(if (dark) Color.rgb(255,151,184) else Color.rgb(37,36,40))
             typeface = Typeface.create(if (dark) "sans-serif-medium" else "sans-serif", if (dark) Typeface.BOLD else Typeface.NORMAL)
         }
@@ -278,34 +289,53 @@ class KeyboardService : InputMethodService() {
             face.addView(fleck, FrameLayout.LayoutParams(-1, -1))
         }
         var longHandled = false
+        var touchHandled = false
+        var touchCancelled = false
+        val alternateKey = tense[key] ?: shiftedMedials[key]
         val longAction = Runnable {
-            val alternate = tense[key]
-            if (alternate != null && !english && !symbols) {
+            if (alternateKey != null && !english && !symbols && !clipboardMode) {
                 longHandled = true
-                showPreview(face, alternate)
+                showPreview(face, alternateKey)
             }
         }
         face.setOnTouchListener { view, event ->
-            when (event.action) {
+            when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     longHandled = false
+                    touchHandled = false
+                    touchCancelled = false
                     view.isPressed = true
-                    showPreview(face, label)
                     handler.postDelayed(longAction, 430)
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val slop = dp(8).toFloat()
+                    if (event.x < -slop || event.y < -slop || event.x > view.width + slop || event.y > view.height + slop) {
+                        touchCancelled = true
+                        handler.removeCallbacks(longAction)
+                        hidePreview()
+                        view.isPressed = false
+                    }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     handler.removeCallbacks(longAction)
                     hidePreview()
                     view.isPressed = false
-                    playClick()
-                    if (longHandled) onKeyPressed(tense[key] ?: key) else onKeyPressed(key)
+                    val slop = dp(8).toFloat()
+                    val insideExpandedBounds = event.x >= -slop && event.y >= -slop && event.x <= view.width + slop && event.y <= view.height + slop
+                    if (!touchHandled && !touchCancelled && insideExpandedBounds) {
+                        touchHandled = true
+                        playClick()
+                        onKeyPressed(if (longHandled) alternateKey ?: key else key)
+                    }
                     true
                 }
-                MotionEvent.ACTION_CANCEL -> {
+                MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> {
                     handler.removeCallbacks(longAction)
                     hidePreview()
                     view.isPressed = false
+                    touchCancelled = true
                     true
                 }
                 else -> true
@@ -381,7 +411,7 @@ class KeyboardService : InputMethodService() {
                     ic.commitText(value, 1)
                     if (english && shifted) { shifted = false; setInputView(buildKeyboard()) }
                 } else {
-                    typeJamo(if (shifted) tense[key] ?: key else key, ic)
+                    typeJamo(if (shifted) tense[key] ?: shiftedMedials[key] ?: key else key, ic)
                     if (shifted) { shifted = false; setInputView(buildKeyboard()) }
                 }
             }
