@@ -4,12 +4,11 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
-import android.media.AudioAttributes
-import android.media.SoundPool
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.SoundEffectConstants
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
@@ -17,11 +16,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.PopupWindow
 import android.widget.TextView
-import java.io.File
-import java.io.FileOutputStream
-import kotlin.math.PI
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 class KeyboardService : InputMethodService() {
     private var shifted = false
@@ -31,13 +26,8 @@ class KeyboardService : InputMethodService() {
     private var l: Int? = null
     private var v: Int? = null
     private var t = 0
-    private var soundPool: SoundPool? = null
-    private var clickSound = 0
-    private var soundReady = false
     private val handler = Handler(Looper.getMainLooper())
     private var preview: PopupWindow? = null
-    private var longPressed = false
-    private var pressedKey: String? = null
 
     private val initials = listOf("ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ")
     private val medials = listOf("ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ")
@@ -75,69 +65,13 @@ class KeyboardService : InputMethodService() {
         )
     )
 
-    override fun onCreate() {
-        super.onCreate()
-        initClickSound()
-    }
-
     override fun onDestroy() {
         preview?.dismiss()
-        soundPool?.release()
-        soundPool = null
         super.onDestroy()
     }
 
-    private fun initClickSound() {
-        try {
-            val attrs = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .build()
-            soundPool = SoundPool.Builder().setMaxStreams(6).setAudioAttributes(attrs).build()
-            val file = File(cacheDir, "soft_click.wav")
-            val rate = 44100
-            val count = (rate * 0.064).toInt()
-            val pcm = ByteArray(count * 2)
-            var noiseState = 0x13579B
-            for (i in 0 until count) {
-                val time = i.toDouble() / rate
-                val x = i.toDouble() / count
-                val decay = (1.0 - x).coerceAtLeast(0.0)
-                noiseState = noiseState * 1103515245 + 12345
-                val noise = (((noiseState ushr 16) and 0x7fff) / 16384.0) - 1.0
-                val attack = if (i < rate * 0.0007) i.toDouble() / (rate * 0.0007) else 1.0
-                val thock = sin(2.0 * PI * 185.0 * time) * 0.48 +
-                    sin(2.0 * PI * 620.0 * time) * 0.20
-                val click = sin(2.0 * PI * 1850.0 * time) * 0.24 +
-                    noise * 0.20 * kotlin.math.exp(-time * 95.0)
-                val returnTick = if (time in 0.010..0.024)
-                    sin(2.0 * PI * 1120.0 * (time - 0.010)) * 0.12 else 0.0
-                val sample = ((thock + click + returnTick) * decay * decay * attack * 15500)
-                    .toInt().coerceIn(-32768, 32767)
-                pcm[i * 2] = sample.toByte()
-                pcm[i * 2 + 1] = (sample shr 8).toByte()
-            }
-            FileOutputStream(file).use { out ->
-                fun writeInt(value: Int) {
-                    out.write(value and 255); out.write((value shr 8) and 255)
-                    out.write((value shr 16) and 255); out.write((value shr 24) and 255)
-                }
-                fun writeShort(value: Int) { out.write(value and 255); out.write((value shr 8) and 255) }
-                out.write("RIFF".toByteArray()); writeInt(36 + pcm.size)
-                out.write("WAVEfmt ".toByteArray()); writeInt(16)
-                writeShort(1); writeShort(1); writeInt(rate); writeInt(rate * 2)
-                writeShort(2); writeShort(16)
-                out.write("data".toByteArray()); writeInt(pcm.size); out.write(pcm)
-            }
-            clickSound = soundPool!!.load(file.absolutePath, 1)
-            soundPool!!.setOnLoadCompleteListener { _, sampleId, status ->
-                if (sampleId == clickSound && status == 0) soundReady = true
-            }
-        } catch (_: Exception) { soundReady = false }
-    }
-
-    private fun playClick() {
-        if (soundReady && clickSound != 0) soundPool?.play(clickSound, 0.55f, 0.55f, 1, 0, 1f)
+    private fun playClick(view: View) {
+        view.playSoundEffect(SoundEffectConstants.CLICK)
     }
 
     override fun onCreateInputView(): View = buildKeyboard()
@@ -255,85 +189,96 @@ class KeyboardService : InputMethodService() {
             face.addView(fleck, FrameLayout.LayoutParams(-1, -1))
         }
         var longHandled = false
-        var touchHandled = false
-        var touchCancelled = false
+        var touchDispatched = false
         var activePointerId = MotionEvent.INVALID_POINTER_ID
+        var fallbackAction: Runnable? = null
         val alternateKey = tense[key] ?: shiftedMedials[key]
+        val supportsLongPress = alternateKey != null && !english && !symbols
         val longAction = Runnable {
-            if (alternateKey != null && !english && !symbols) {
+            if (activePointerId != MotionEvent.INVALID_POINTER_ID && !touchDispatched && supportsLongPress) {
+                touchDispatched = true
                 longHandled = true
+                playClick(face)
+                onKeyPressed(alternateKey!!)
                 showPreview(face, alternateKey)
             }
+        }
+        fun restoreKeyFace(view: View) {
+            view.animate().cancel()
+            view.animate()
+                .scaleX(1f).scaleY(1f)
+                .translationY(0f)
+                .setDuration(95)
+                .start()
+        }
+        fun dispatchBaseOnce(view: View) {
+            if (!touchDispatched) {
+                touchDispatched = true
+                playClick(view)
+                onKeyPressed(key)
+            }
+        }
+        fun clearTouch(view: View) {
+            handler.removeCallbacks(longAction)
+            fallbackAction?.let { handler.removeCallbacks(it) }
+            fallbackAction = null
+            hidePreview()
+            restoreKeyFace(view)
+            activePointerId = MotionEvent.INVALID_POINTER_ID
+            view.parent?.requestDisallowInterceptTouchEvent(false)
         }
         face.setOnTouchListener { view, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    handler.removeCallbacks(longAction)
+                    fallbackAction?.let { handler.removeCallbacks(it) }
                     activePointerId = event.getPointerId(0)
                     longHandled = false
-                    touchHandled = false
-                    touchCancelled = false
+                    touchDispatched = false
                     view.parent?.requestDisallowInterceptTouchEvent(true)
-                    view.isPressed = true
-                    handler.removeCallbacks(longAction)
-                    handler.postDelayed(longAction, 430)
+                    view.animate().cancel()
+                    view.animate()
+                        .scaleX(0.94f).scaleY(0.94f)
+                        .translationY(dp(1).toFloat())
+                        .setDuration(65)
+                        .start()
+                    fallbackAction = Runnable {
+                        if (activePointerId != MotionEvent.INVALID_POINTER_ID && !touchDispatched) {
+                            dispatchBaseOnce(view)
+                        }
+                    }
+                    handler.postDelayed(fallbackAction!!, if (supportsLongPress) 470L else 90L)
+                    if (supportsLongPress) handler.postDelayed(longAction, 430L)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val pointerIndex = event.findPointerIndex(activePointerId)
-                    if (pointerIndex < 0) {
-                        touchCancelled = true
-                        handler.removeCallbacks(longAction)
-                        hidePreview()
-                        view.isPressed = false
-                    } else {
-                        val slop = dp(12).toFloat()
-                        val x = event.getX(pointerIndex)
-                        val y = event.getY(pointerIndex)
-                        if (x < -slop || y < -slop || x > view.width + slop || y > view.height + slop) {
-                            touchCancelled = true
-                            handler.removeCallbacks(longAction)
-                            hidePreview()
-                            view.isPressed = false
-                        }
-                    }
+                    // Keep the original key captured while the finger is down; parent rows must not steal the gesture.
                     true
                 }
                 MotionEvent.ACTION_POINTER_DOWN -> true
                 MotionEvent.ACTION_POINTER_UP -> {
                     if (event.getPointerId(event.actionIndex) == activePointerId) {
-                        touchCancelled = true
-                        handler.removeCallbacks(longAction)
-                        hidePreview()
-                        view.isPressed = false
+                        if (!touchDispatched && !longHandled) dispatchBaseOnce(view)
+                        clearTouch(view)
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    handler.removeCallbacks(longAction)
-                    hidePreview()
-                    view.isPressed = false
                     val pointerIndex = event.findPointerIndex(activePointerId)
-                    val slop = dp(12).toFloat()
-                    val insideExpandedBounds = pointerIndex >= 0 &&
+                    val slop = dp(18).toFloat()
+                    val inside = pointerIndex >= 0 &&
                         event.getX(pointerIndex) >= -slop && event.getY(pointerIndex) >= -slop &&
                         event.getX(pointerIndex) <= view.width + slop &&
                         event.getY(pointerIndex) <= view.height + slop
-                    if (!touchHandled && !touchCancelled && insideExpandedBounds) {
-                        touchHandled = true
-                        playClick()
-                        onKeyPressed(if (longHandled) alternateKey ?: key else key)
-                    }
-                    activePointerId = MotionEvent.INVALID_POINTER_ID
-                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                    if (inside && !touchDispatched && !longHandled) dispatchBaseOnce(view)
+                    clearTouch(view)
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    handler.removeCallbacks(longAction)
-                    hidePreview()
-                    view.isPressed = false
-                    touchCancelled = true
-                    activePointerId = MotionEvent.INVALID_POINTER_ID
-                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                    // A cancelled UP must not silently eat a key tap.
+                    if (activePointerId != MotionEvent.INVALID_POINTER_ID && !touchDispatched && !longHandled)
+                        dispatchBaseOnce(view)
+                    clearTouch(view)
                     true
                 }
                 else -> true
