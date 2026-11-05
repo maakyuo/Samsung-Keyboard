@@ -4,36 +4,116 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.inputmethodservice.InputMethodService
+import android.media.AudioAttributes
+import android.media.SoundPool
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.PopupWindow
 import android.widget.TextView
+import java.io.File
+import java.io.FileOutputStream
+import kotlin.math.PI
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 class KeyboardService : InputMethodService() {
     private var shifted = false
     private var symbols = false
+    private var english = false
     private var l: Int? = null
     private var v: Int? = null
-    private var t: Int = 0
+    private var t = 0
+    private var soundPool: SoundPool? = null
+    private var clickSound = 0
+    private var soundReady = false
+    private val handler = Handler(Looper.getMainLooper())
+    private var preview: PopupWindow? = null
+    private var longPressed = false
+    private var pressedKey: String? = null
 
     private val initials = listOf("ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ")
     private val medials = listOf("ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ")
     private val finals = listOf("","ㄱ","ㄲ","ㄳ","ㄴ","ㄵ","ㄶ","ㄷ","ㄹ","ㄺ","ㄻ","ㄼ","ㄽ","ㄾ","ㄿ","ㅀ","ㅁ","ㅂ","ㅄ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ")
     private val vowelJoin = mapOf("ㅗㅏ" to "ㅘ","ㅗㅐ" to "ㅙ","ㅗㅣ" to "ㅚ","ㅜㅓ" to "ㅝ","ㅜㅔ" to "ㅞ","ㅜㅣ" to "ㅟ","ㅡㅣ" to "ㅢ")
     private val finalJoin = mapOf("ㄱㅅ" to "ㄳ","ㄴㅈ" to "ㄵ","ㄴㅎ" to "ㄶ","ㄹㄱ" to "ㄺ","ㄹㅁ" to "ㄻ","ㄹㅂ" to "ㄼ","ㄹㅅ" to "ㄽ","ㄹㅌ" to "ㄾ","ㄹㅍ" to "ㄿ","ㄹㅎ" to "ㅀ","ㅂㅅ" to "ㅄ")
-    private val initialJoin = mapOf("ㄱㄱ" to "ㄲ","ㄷㄷ" to "ㄸ","ㅂㅂ" to "ㅃ","ㅅㅅ" to "ㅆ","ㅈㅈ" to "ㅉ")
-    private val firstRow = listOf("ㅂ","ㅈ","ㄷ","ㄱ","ㅅ","ㅛ","ㅕ","ㅑ","ㅐ","ㅔ")
-    private val secondRow = listOf("ㅁ","ㄴ","ㅇ","ㄹ","ㅎ","ㅗ","ㅓ","ㅏ","ㅣ")
-    private val thirdRow = listOf("⇧","ㅋ","ㅌ","ㅊ","ㅍ","ㅠ","ㅜ","ㅡ","⌫")
-    private val symbolRows = listOf(
-        listOf("1","2","3","4","5","6","7","8","9","0"),
-        listOf("@","#","$","%","&","-","+","(",")","/"),
-        listOf("⇧","*","\"","' ",":",";","!","?","⌫")
+    private val tense = mapOf("ㄱ" to "ㄲ","ㄷ" to "ㄸ","ㅂ" to "ㅃ","ㅅ" to "ㅆ","ㅈ" to "ㅉ")
+    private val numberRow = listOf("1","2","3","4","5","6","7","8","9","0")
+    private val koreanRows = listOf(
+        listOf("ㅂ","ㅈ","ㄷ","ㄱ","ㅅ","ㅛ","ㅕ","ㅑ","ㅐ","ㅔ"),
+        listOf("ㅁ","ㄴ","ㅇ","ㄹ","ㅎ","ㅗ","ㅓ","ㅏ","ㅣ"),
+        listOf("⇧","ㅋ","ㅌ","ㅊ","ㅍ","ㅠ","ㅜ","ㅡ","⌫")
     )
+    private val englishRows = listOf(
+        listOf("q","w","e","r","t","y","u","i","o","p"),
+        listOf("a","s","d","f","g","h","j","k","l"),
+        listOf("⇧","z","x","c","v","b","n","m","⌫")
+    )
+    private val symbolRows = listOf(
+        listOf("@","#","$","%","&","-","+","(",")","/"),
+        listOf("*","\"","' ",":",";","!","?","=","_"),
+        listOf("⇧","\\","~","<",">","[","]","{","⌫")
+    )
+
+    override fun onCreate() {
+        super.onCreate()
+        initClickSound()
+    }
+
+    override fun onDestroy() {
+        preview?.dismiss()
+        soundPool?.release()
+        soundPool = null
+        super.onDestroy()
+    }
+
+    private fun initClickSound() {
+        try {
+            val attrs = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+            soundPool = SoundPool.Builder().setMaxStreams(6).setAudioAttributes(attrs).build()
+            val file = File(cacheDir, "soft_click.wav")
+            val rate = 44100
+            val count = (rate * 0.032).toInt()
+            val pcm = ByteArray(count * 2)
+            for (i in 0 until count) {
+                val decay = (1.0 - i.toDouble() / count).coerceAtLeast(0.0)
+                val tone = sin(2.0 * PI * 1850.0 * i / rate) * 0.34 +
+                    sin(2.0 * PI * 3100.0 * i / rate) * 0.10
+                val sample = (tone * decay * 10500).toInt().coerceIn(-32768, 32767)
+                pcm[i * 2] = sample.toByte()
+                pcm[i * 2 + 1] = (sample shr 8).toByte()
+            }
+            FileOutputStream(file).use { out ->
+                fun writeInt(value: Int) {
+                    out.write(value and 255); out.write((value shr 8) and 255)
+                    out.write((value shr 16) and 255); out.write((value shr 24) and 255)
+                }
+                fun writeShort(value: Int) { out.write(value and 255); out.write((value shr 8) and 255) }
+                out.write("RIFF".toByteArray()); writeInt(36 + pcm.size)
+                out.write("WAVEfmt ".toByteArray()); writeInt(16)
+                writeShort(1); writeShort(1); writeInt(rate); writeInt(rate * 2)
+                writeShort(2); writeShort(16)
+                out.write("data".toByteArray()); writeInt(pcm.size); out.write(pcm)
+            }
+            clickSound = soundPool!!.load(file.absolutePath, 1)
+            soundPool!!.setOnLoadCompleteListener { _, sampleId, status ->
+                if (sampleId == clickSound && status == 0) soundReady = true
+            }
+        } catch (_: Exception) { soundReady = false }
+    }
+
+    private fun playClick() {
+        if (soundReady && clickSound != 0) soundPool?.play(clickSound, 0.55f, 0.55f, 1, 0, 1f)
+    }
 
     override fun onCreateInputView(): View = buildKeyboard()
 
@@ -48,91 +128,152 @@ class KeyboardService : InputMethodService() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(7), 0, dp(5), dp(5))
         }
-        val title = TextView(this).apply {
+        banner.addView(TextView(this).apply {
             text = "TOP SECRET  /  LEVEL 7"
-            textSize = 10f
-            letterSpacing = .12f
+            textSize = 10f; letterSpacing = .12f
             setTextColor(Color.rgb(255,137,174))
             typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
-        }
-        banner.addView(title, LinearLayout.LayoutParams(0, dp(25), 1f))
+        }, LinearLayout.LayoutParams(0, dp(25), 1f))
         banner.addView(TextView(this).apply {
-            text = "NANA  •  🐰"
-            textSize = 10f
-            setTextColor(Color.rgb(255,180,202))
-            typeface = Typeface.DEFAULT_BOLD
+            text = "NANA  •  🐰"; textSize = 10f
+            setTextColor(Color.rgb(255,180,202)); typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
         })
         root.addView(banner)
 
-        val rows = if (symbols) symbolRows + listOf(listOf("가나다",",","한/영","space",".","↵")) else listOf(firstRow, secondRow, thirdRow, listOf("?123",",","한/영","space",".","↵"))
-        rows.forEachIndexed { rowIndex, keys ->
-            val line = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                setPadding(if (rowIndex == 1) dp(8) else 0, dp(2), if (rowIndex == 1) dp(8) else 0, dp(2))
-            }
-            keys.forEachIndexed { keyIndex, key ->
-                val modifier = key in listOf("⇧","⌫","?123","↵","한/영","가나다")
-                val weight = when (key) {
-                    "space" -> 2.65f
-                    "한/영" -> 1.15f
-                    "?123","가나다" -> 1.18f
-                    "⇧","⌫","↵" -> 1.22f
-                    else -> 1f
-                }
-                val keyHeight = if (rowIndex == rows.lastIndex) 43 else 47
-                line.addView(makeKey(key, modifier, rowIndex, keyIndex), LinearLayout.LayoutParams(0, dp(keyHeight), weight).apply {
-                    setMargins(dp(2), dp(2), dp(2), dp(2))
-                })
-            }
-            root.addView(line)
+        addRow(root, numberRow, 0)
+        val rows = when {
+            symbols -> symbolRows
+            english -> englishRows
+            else -> koreanRows
         }
+        rows.forEachIndexed { index, keys -> addRow(root, keys, index + 1) }
+        val bottom = if (symbols) listOf("가나다",",","한/영","space",".","↵")
+            else listOf("?123",",","한/영","space",".","↵")
+        addRow(root, bottom, 4)
         return root
     }
 
-    private fun makeKey(key: String, modifier: Boolean, row: Int, index: Int): View {
-        val dark = modifier || key in listOf("🔫","🐰")
-        val label = when (key) {
-            "space" -> "한글"
-            "⇧" -> if (shifted) "⬆" else "⇧"
-            else -> key
+    private fun addRow(root: LinearLayout, keys: List<String>, rowIndex: Int) {
+        val line = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            if (rowIndex == 2) setPadding(dp(8), dp(2), dp(8), dp(2))
+            else setPadding(0, dp(2), 0, dp(2))
         }
+        keys.forEachIndexed { index, key ->
+            val modifier = key in listOf("⇧","⌫","?123","↵","한/영","가나다")
+            val weight = when (key) {
+                "space" -> 2.65f
+                "한/영" -> 1.15f
+                "?123","가나다" -> 1.18f
+                "⇧","⌫","↵" -> 1.22f
+                else -> 1f
+            }
+            val height = if (rowIndex == 4) 43 else 47
+            line.addView(makeKey(key, modifier), LinearLayout.LayoutParams(0, dp(height), weight).apply {
+                setMargins(dp(2), dp(2), dp(2), dp(2))
+            })
+        }
+        root.addView(line)
+    }
+
+    private fun makeKey(key: String, modifier: Boolean): View {
+        val isDark = modifier
+        val label = when (key) {
+            "space" -> if (english) "English" else "한글"
+            "⇧" -> if (shifted) "⬆" else "⇧"
+            else -> key.trim()
+        }
+        val normalBg = if (isDark) Color.rgb(35,34,39) else Color.rgb(248,247,244)
         val face = FrameLayout(this).apply {
-            background = shape(
-                if (dark) Color.rgb(35,34,39) else Color.rgb(248,247,244),
-                if (modifier) 7 else 6,
-                if (dark) Color.rgb(92,77,88) else Color.rgb(218,210,207),
-                1
-            )
+            background = shape(normalBg, if (modifier) 7 else 6,
+                if (isDark) Color.rgb(92,77,88) else Color.rgb(218,210,207), 1)
             elevation = dp(if (modifier) 1 else 2).toFloat()
         }
+        face.tag = normalBg
         val text = TextView(this).apply {
-            this.text = label
-            gravity = Gravity.CENTER
+            this.text = label; gravity = Gravity.CENTER
             textSize = when (key) { "space" -> 10f; "?123","한/영","가나다" -> 11f; else -> 17f }
-            setTextColor(if (dark) Color.rgb(255,151,184) else Color.rgb(37,36,40))
-            typeface = Typeface.create(if (dark) "sans-serif-medium" else "sans-serif", if (dark) Typeface.BOLD else Typeface.NORMAL)
+            setTextColor(if (isDark) Color.rgb(255,151,184) else Color.rgb(37,36,40))
+            typeface = Typeface.create(if (isDark) "sans-serif-medium" else "sans-serif",
+                if (isDark) Typeface.BOLD else Typeface.NORMAL)
         }
         face.addView(text, FrameLayout.LayoutParams(-1, -1))
-        if (!dark && key !in listOf("space",",",".")) {
-            val fleck = TextView(this).apply {
-                this.text = listOf("·","✦","／","•","✧")[(row * 3 + index) % 5]
+        if (!isDark && key !in listOf("space",",",".")) {
+            face.addView(TextView(this).apply {
+                this.text = listOf("·","✦","／","•","✧")[(key.hashCode().absoluteValueSafe()) % 5]
                 textSize = 10f
-                setTextColor(listOf(Color.rgb(237,105,145),Color.rgb(111,180,215),Color.rgb(239,193,93))[(row + index) % 3])
+                setTextColor(Color.rgb(237,105,145))
                 gravity = Gravity.TOP or Gravity.END
                 setPadding(0, dp(1), dp(3), 0)
-            }
-            face.addView(fleck, FrameLayout.LayoutParams(-1, -1))
+            }, FrameLayout.LayoutParams(-1, -1))
         }
-        face.setOnClickListener { onKeyPressed(key) }
+        var longHandled = false
+        val longAction = Runnable {
+            val alternate = tense[key]
+            if (alternate != null && !english && !symbols) {
+                longHandled = true
+                longPressed = true
+                showPreview(face, alternate)
+                face.background = shape(Color.rgb(255,224,235), 6, Color.rgb(235,112,151), 2)
+            }
+        }
+        face.setOnTouchListener { view, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    longHandled = false; longPressed = false; pressedKey = key
+                    view.background = shape(Color.rgb(255,224,235), 6, Color.rgb(235,112,151), 2)
+                    showPreview(face, label)
+                    handler.postDelayed(longAction, 430)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    handler.removeCallbacks(longAction)
+                    hidePreview()
+                    view.background = shape(normalBg, if (modifier) 7 else 6,
+                        if (isDark) Color.rgb(92,77,88) else Color.rgb(218,210,207), 1)
+                    playClick()
+                    if (longHandled && tense[key] != null) onKeyPressed(tense[key]!!)
+                    else if (!longHandled) onKeyPressed(key)
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    handler.removeCallbacks(longAction); hidePreview()
+                    view.background = shape(normalBg, if (modifier) 7 else 6,
+                        if (isDark) Color.rgb(92,77,88) else Color.rgb(218,210,207), 1)
+                    true
+                }
+                else -> true
+            }
+        }
         return face
+    }
+
+    private fun showPreview(anchor: View, value: String) {
+        hidePreview()
+        val bubble = TextView(this).apply {
+            text = value; gravity = Gravity.CENTER
+            textSize = 25f; typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.rgb(39,35,40))
+            background = shape(Color.rgb(255,249,251), 13, Color.rgb(235,112,151), 2)
+            elevation = dp(8).toFloat()
+        }
+        preview = PopupWindow(bubble, dp(54), dp(58), false).apply {
+            isClippingEnabled = false
+            elevation = dp(8).toFloat()
+            showAsDropDown(anchor, 0, -dp(66), Gravity.TOP or Gravity.CENTER_HORIZONTAL)
+        }
+    }
+
+    private fun hidePreview() {
+        preview?.dismiss()
+        preview = null
     }
 
     private fun shape(color: Int, radius: Int, stroke: Int, strokeWidth: Int) =
         GradientDrawable().apply {
-            setColor(color)
-            cornerRadius = dp(radius).toFloat()
+            setColor(color); cornerRadius = dp(radius).toFloat()
             setStroke(dp(strokeWidth), stroke)
         }
 
@@ -143,79 +284,82 @@ class KeyboardService : InputMethodService() {
             "⌫" -> deleteOne(ic)
             "?123" -> { finishComposition(ic); symbols = true; setInputView(buildKeyboard()) }
             "가나다" -> { finishComposition(ic); symbols = false; setInputView(buildKeyboard()) }
-            "한/영" -> { finishComposition(ic); requestHideSelf(0) }
+            "한/영" -> {
+                finishComposition(ic); english = !english; symbols = false; shifted = false
+                setInputView(buildKeyboard())
+            }
             "space" -> { finishComposition(ic); ic.commitText(" ", 1) }
             "↵" -> {
                 finishComposition(ic)
                 val action = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE
-                if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) ic.performEditorAction(action) else ic.commitText("\n", 1)
+                if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED)
+                    ic.performEditorAction(action) else ic.commitText("\n", 1)
             }
             "," -> { finishComposition(ic); ic.commitText(",", 1) }
             "." -> { finishComposition(ic); ic.commitText(".", 1) }
             else -> {
-                val actual = if (shifted) initialJoin[key + key] ?: key else key
-                typeJamo(actual, ic)
-                if (shifted) { shifted = false; setInputView(buildKeyboard()) }
+                if (english || symbols || key.length > 1 && key !in initials) {
+                    finishComposition(ic)
+                    val value = if (english && shifted) key.uppercase() else key
+                    ic.commitText(value, 1)
+                    if (english && shifted) { shifted = false; setInputView(buildKeyboard()) }
+                } else {
+                    typeJamo(if (shifted) tense[key] ?: key else key, ic)
+                    if (shifted) { shifted = false; setInputView(buildKeyboard()) }
+                }
             }
         }
     }
 
     private fun typeJamo(char: String, ic: InputConnection) {
-        if (char.length != 1) { finishComposition(ic); ic.commitText(char, 1); return }
         if (char in medials) { addVowel(char, ic); return }
         if (char in initials) { addConsonant(char, ic); return }
-        finishComposition(ic)
-        ic.commitText(char, 1)
+        finishComposition(ic); ic.commitText(char, 1)
     }
 
     private fun addConsonant(char: String, ic: InputConnection) {
         val newL = initials.indexOf(char)
         val newT = finals.indexOf(char)
-        if (l == null && v == null) {
-            if (newL >= 0) l = newL else { ic.commitText(char, 1); return }
-        } else if (l != null && v == null) {
-            val doubled = initialJoin[initials[l!!] + char]
-            if (doubled != null) l = initials.indexOf(doubled)
-            else { finishComposition(ic); l = newL }
-        } else if (l != null && v != null && t == 0) {
-            if (newT > 0) t = newT else { finishComposition(ic); l = newL }
-        } else if (l != null && v != null) {
-            val joined = finalJoin[finals[t] + char]
-            if (joined != null) t = finals.indexOf(joined)
-            else { finishComposition(ic); l = newL }
-        } else {
-            finishComposition(ic); l = newL
+        when {
+            l == null && v == null -> if (newL >= 0) l = newL else ic.commitText(char, 1)
+            l != null && v == null -> {
+                val doubled = tense[initials[l!!] ]
+                if (doubled == char) l = initials.indexOf(char)
+                else { finishComposition(ic); l = newL }
+            }
+            l != null && v != null && t == 0 -> if (newT > 0) t = newT else { finishComposition(ic); l = newL }
+            l != null && v != null -> {
+                val joined = finalJoin[finals[t] + char]
+                if (joined != null) t = finals.indexOf(joined)
+                else { finishComposition(ic); l = newL }
+            }
+            else -> { finishComposition(ic); l = newL }
         }
         showComposition(ic)
     }
 
     private fun addVowel(char: String, ic: InputConnection) {
         val newV = medials.indexOf(char)
-        if (l == null && v == null) {
-            v = newV
-        } else if (l == null && v != null) {
-            val joined = vowelJoin[medials[v!!] + char]
-            if (joined != null) v = medials.indexOf(joined)
-            else { finishComposition(ic); v = newV }
-        } else if (l != null && v == null) {
-            v = newV
-        } else if (l != null && v != null && t == 0) {
-            val joined = vowelJoin[medials[v!!] + char]
-            if (joined != null) v = medials.indexOf(joined)
-            else { finishComposition(ic); v = newV }
-        } else if (l != null && v != null && t != 0) {
-            val finalText = finals[t]
-            val split = finalJoin.entries.firstOrNull { it.value == finalText }?.key
-            val keep = split?.first()?.toString() ?: ""
-            val move = split?.last()?.toString() ?: finalText
-            val oldL = l!!
-            val oldV = v!!
-            val oldT = if (keep.isEmpty()) 0 else finals.indexOf(keep)
-            val oldText = syllable(oldL, oldV, oldT)
-            ic.commitText(oldText, 1)
-            l = initials.indexOf(move).takeIf { it >= 0 }
-            v = newV
-            t = 0
+        when {
+            l == null && v == null -> v = newV
+            l == null && v != null -> {
+                val joined = vowelJoin[medials[v!!] + char]
+                if (joined != null) v = medials.indexOf(joined) else { finishComposition(ic); v = newV }
+            }
+            l != null && v == null -> v = newV
+            l != null && v != null && t == 0 -> {
+                val joined = vowelJoin[medials[v!!] + char]
+                if (joined != null) v = medials.indexOf(joined) else { finishComposition(ic); v = newV }
+            }
+            l != null && v != null && t != 0 -> {
+                val finalText = finals[t]
+                val split = finalJoin.entries.firstOrNull { it.value == finalText }?.key
+                val keep = split?.first()?.toString() ?: ""
+                val move = split?.last()?.toString() ?: finalText
+                val oldText = syllable(l!!, v!!, if (keep.isEmpty()) 0 else finals.indexOf(keep))
+                ic.commitText(oldText, 1)
+                l = initials.indexOf(move).takeIf { it >= 0 }; v = newV; t = 0
+            }
         }
         showComposition(ic)
     }
@@ -252,11 +396,12 @@ class KeyboardService : InputMethodService() {
                 if (compound != null) v = medials.indexOf(compound.first().toString()) else v = null
             }
             l != null -> l = null
+            else -> ic.deleteSurroundingText(1, 0)
         }
         val value = currentComposition()
-        if (value.isEmpty()) ic.setComposingText("", 1) else ic.setComposingText(value, 1)
-        if (l == null && v == null && t == 0) ic.deleteSurroundingText(1, 0)
+        ic.setComposingText(value, 1)
     }
 
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
+    private fun Int.absoluteValueSafe() = if (this == Int.MIN_VALUE) 0 else kotlin.math.abs(this)
 }
