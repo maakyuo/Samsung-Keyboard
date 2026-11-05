@@ -225,6 +225,7 @@ class KeyboardService : InputMethodService() {
                 "한/영" -> 1.15f
                 "?123","가나다" -> 1.18f
                 "⇧","⌫","↵","‹","›","📋","닫기" -> 1.22f
+                else -> if (key.matches(Regex("[1-3]/3"))) 1.22f else 1f
                 else -> 1f
             }
             val keyHeight = if (rowIndex == 4) 43 else 39
@@ -243,6 +244,8 @@ class KeyboardService : InputMethodService() {
             else -> if (key.startsWith("clip:")) clipboardHistory.getOrNull(key.substringAfter(":").toIntOrNull() ?: -1)?.take(34) ?: "" else key.trim()
         }
         val face = FrameLayout(this).apply {
+            isClickable = true
+            isFocusable = true
             background = shape(
                 if (dark) Color.rgb(35,34,39) else Color.rgb(248,247,244),
                 if (modifier) 7 else 6,
