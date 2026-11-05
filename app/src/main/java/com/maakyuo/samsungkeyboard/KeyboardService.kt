@@ -112,12 +112,12 @@ class KeyboardService : InputMethodService() {
             gravity = Gravity.CENTER
             textSize = when (key) { "space" -> 10f; "?123","한/영","가나다" -> 11f; else -> 17f }
             setTextColor(if (dark) Color.rgb(255,151,184) else Color.rgb(37,36,40))
-            typeface = Typeface.create(if (dark) "sans-serif-medium" else "sans-serif", if (dark) Typeface.BOLD else Typeface.MEDIUM)
+            typeface = Typeface.create(if (dark) "sans-serif-medium" else "sans-serif", if (dark) Typeface.BOLD else Typeface.NORMAL)
         }
         face.addView(text, FrameLayout.LayoutParams(-1, -1))
         if (!dark && key !in listOf("space",",",".")) {
             val fleck = TextView(this).apply {
-                text = listOf("·","✦","／","•","✧")[(row * 3 + index) % 5]
+                this.text = listOf("·","✦","／","•","✧")[(row * 3 + index) % 5]
                 textSize = 10f
                 setTextColor(listOf(Color.rgb(237,105,145),Color.rgb(111,180,215),Color.rgb(239,193,93))[(row + index) % 3])
                 gravity = Gravity.TOP or Gravity.END
