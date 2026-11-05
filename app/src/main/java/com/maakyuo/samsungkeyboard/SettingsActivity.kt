@@ -33,7 +33,7 @@ class SettingsActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(24, 34, 24, 36)
+            setPadding(dp(24), dp(34), dp(24), dp(36))
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.rgb(34,32,38), Color.rgb(66,42,54)))
         }
         root.addView(TextView(this).apply {
@@ -62,13 +62,13 @@ class SettingsActivity : Activity() {
         })
         root.addView(Switch(this).apply {
             text = "터치음 사용"
-            textSize = 16f
+            textSize = 24f
             setTextColor(Color.rgb(255,239,244))
             isChecked = prefs.getBoolean(KeyboardSound.KEY_ENABLED, true)
             setOnCheckedChangeListener { _, checked ->
                 prefs.edit().putBoolean(KeyboardSound.KEY_ENABLED, checked).apply()
             }
-        }, LinearLayout.LayoutParams(-1, 54))
+        }, LinearLayout.LayoutParams(-1, 162))
         root.addView(TextView(this).apply {
             text = "소리를 눌러 미리 듣고 원하는 소리를 선택해."
             textSize = 13f
@@ -97,18 +97,20 @@ class SettingsActivity : Activity() {
         setContentView(scroll)
     }
 
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
     private fun actionButton(caption: String, action: () -> Unit) = Button(this).apply {
         text = caption
         isAllCaps = false
-        textSize = 14f
+        textSize = 20f
         setTextColor(Color.rgb(255,239,244))
         background = GradientDrawable().apply {
             cornerRadius = 16f
             setColor(Color.rgb(112,55,79))
             setStroke(1, Color.rgb(235,112,151))
         }
-        setPadding(18, 8, 18, 8)
+        setPadding(36, 24, 36, 24)
         setOnClickListener { action() }
-        layoutParams = LinearLayout.LayoutParams(-1, 52).apply { bottomMargin = 9 }
+        layoutParams = LinearLayout.LayoutParams(-1, 156).apply { bottomMargin = 18 }
     }
 }
