@@ -1,6 +1,5 @@
 package com.maakyuo.samsungkeyboard
 
-import android.content.ClipboardManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -23,17 +22,12 @@ import java.io.FileOutputStream
 import kotlin.math.PI
 import kotlin.math.roundToInt
 import kotlin.math.sin
-import org.json.JSONArray
 
 class KeyboardService : InputMethodService() {
     private var shifted = false
     private var symbols = false
     private var symbolPage = 0
-    private var clipboardMode = false
     private var english = false
-    private val clipboardHistory = mutableListOf<String>()
-    private var clipboardManager: ClipboardManager? = null
-    private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { captureClipboard() }
     private var l: Int? = null
     private var v: Int? = null
     private var t = 0
@@ -84,15 +78,10 @@ class KeyboardService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         initClickSound()
-        clipboardManager = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        loadClipboardHistory()
-        clipboardManager?.addPrimaryClipChangedListener(clipboardListener)
-        captureClipboard()
     }
 
     override fun onDestroy() {
         preview?.dismiss()
-        clipboardManager?.removePrimaryClipChangedListener(clipboardListener)
         soundPool?.release()
         soundPool = null
         super.onDestroy()
@@ -107,16 +96,24 @@ class KeyboardService : InputMethodService() {
             soundPool = SoundPool.Builder().setMaxStreams(6).setAudioAttributes(attrs).build()
             val file = File(cacheDir, "soft_click.wav")
             val rate = 44100
-            val count = (rate * 0.046).toInt()
+            val count = (rate * 0.064).toInt()
             val pcm = ByteArray(count * 2)
+            var noiseState = 0x13579B
             for (i in 0 until count) {
+                val time = i.toDouble() / rate
                 val x = i.toDouble() / count
-                val decay = (1.0 - x).coerceAtLeast(0.0).let { it * it }
-                val attack = if (i < rate * 0.002) i.toDouble() / (rate * 0.002) else 1.0
-                val body = sin(2.0 * PI * 720.0 * i / rate) * 0.48 +
-                    sin(2.0 * PI * 1380.0 * i / rate) * 0.22 +
-                    sin(2.0 * PI * 210.0 * i / rate) * 0.18
-                val sample = (body * decay * attack * 12500).toInt().coerceIn(-32768, 32767)
+                val decay = (1.0 - x).coerceAtLeast(0.0)
+                noiseState = noiseState * 1103515245 + 12345
+                val noise = (((noiseState ushr 16) and 0x7fff) / 16384.0) - 1.0
+                val attack = if (i < rate * 0.0007) i.toDouble() / (rate * 0.0007) else 1.0
+                val thock = sin(2.0 * PI * 185.0 * time) * 0.48 +
+                    sin(2.0 * PI * 620.0 * time) * 0.20
+                val click = sin(2.0 * PI * 1850.0 * time) * 0.24 +
+                    noise * 0.20 * kotlin.math.exp(-time * 95.0)
+                val returnTick = if (time in 0.010..0.024)
+                    sin(2.0 * PI * 1120.0 * (time - 0.010)) * 0.12 else 0.0
+                val sample = ((thock + click + returnTick) * decay * decay * attack * 15500)
+                    .toInt().coerceIn(-32768, 32767)
                 pcm[i * 2] = sample.toByte()
                 pcm[i * 2 + 1] = (sample shr 8).toByte()
             }
@@ -172,34 +169,6 @@ class KeyboardService : InputMethodService() {
             gravity = Gravity.CENTER
         })
         root.addView(banner)
-        if (clipboardMode) {
-            val heading = TextView(this).apply {
-                text = "CLIPBOARD  •  최근 복사 항목"
-                textSize = 13f
-                gravity = Gravity.CENTER_VERTICAL
-                setTextColor(Color.rgb(255,151,184))
-                setPadding(dp(8), dp(5), dp(8), dp(5))
-            }
-            root.addView(heading, LinearLayout.LayoutParams(-1, dp(34)))
-            if (clipboardHistory.isEmpty()) {
-                val empty = TextView(this).apply {
-                    text = "저장된 항목이 없습니다"
-                    gravity = Gravity.CENTER
-                    setTextColor(Color.LTGRAY)
-                    textSize = 14f
-                }
-                root.addView(empty, LinearLayout.LayoutParams(-1, 0, 1f))
-            } else {
-                clipboardHistory.take(3).forEachIndexed { index, value ->
-                    val item = makeKey("clip:$index", false, 0, index)
-                    root.addView(item, LinearLayout.LayoutParams(-1, 0, 1f).apply {
-                        setMargins(dp(3), dp(2), dp(3), dp(2))
-                    })
-                }
-            }
-            addStyledRow(root, listOf("닫기"), 4, 4)
-            return root
-        }
         addStyledRow(root, numberRow, 0, 0)
         val rows = when {
             symbols -> symbolPages[symbolPage].map { row ->
@@ -209,12 +178,12 @@ class KeyboardService : InputMethodService() {
                     else -> key
                 } }
             }
-            english -> englishRows
+            english -> if (shifted) englishRows.map { row -> row.map { it.uppercase() } } else englishRows
             else -> koreanRows
         }
         rows.forEachIndexed { rowIndex, keys -> addStyledRow(root, keys, rowIndex + 1, rowIndex) }
-        val bottom = if (symbols) listOf("가나다","📋","한/영","space",".","↵")
-            else listOf("?123","📋","한/영","space",".","↵")
+        val bottom = if (symbols) listOf("가나다","한/영","space",".","↵")
+            else listOf("?123","한/영","space",".","↵")
         addStyledRow(root, bottom, 4, 4)
         return root
     }
@@ -226,12 +195,12 @@ class KeyboardService : InputMethodService() {
             setPadding(if (rowIndex == 2) dp(8) else 0, dp(2), if (rowIndex == 2) dp(8) else 0, dp(2))
         }
         keys.forEachIndexed { keyIndex, key ->
-            val modifier = key in listOf("⇧","⌫","?123","↵","한/영","가나다","‹","›","📋","닫기") || key.matches(Regex("[1-3]/3")) || key.startsWith("clip:")
+            val modifier = key in listOf("⇧","⌫","?123","↵","한/영","가나다","‹","›") || key.matches(Regex("[1-3]/3"))
             val weight = when (key) {
                 "space" -> 2.65f
                 "한/영" -> 1.15f
                 "?123","가나다" -> 1.18f
-                "⇧","⌫","↵","‹","›","📋","닫기" -> 1.22f
+                "⇧","⌫","↵","‹","›" -> 1.22f
                 else -> if (key.matches(Regex("[1-3]/3"))) 1.22f else 1f
             }
             val keyHeight = if (rowIndex == 4) 43 else 39
@@ -247,9 +216,7 @@ class KeyboardService : InputMethodService() {
         val label = when (key) {
             "space" -> if (english) "English" else "한글"
             "⇧" -> "⇧"
-            else -> if (key.startsWith("clip:")) {
-                clipboardHistory.getOrNull(key.substringAfter(":").toIntOrNull() ?: -1)?.take(34) ?: ""
-            } else if (shifted && !english && !symbols) {
+            else -> if (shifted && !english && !symbols) {
                 (tense[key] ?: shiftedMedials[key] ?: key).trim()
             } else key.trim()
         }
@@ -268,7 +235,6 @@ class KeyboardService : InputMethodService() {
             this.text = label
             gravity = Gravity.CENTER
             textSize = when {
-                key.startsWith("clip:") -> 21f
                 key == "space" -> 10f
                 key in listOf("?123","한/영","가나다") -> 11f
                 key.matches(Regex("[1-3]/3")) -> 13f
@@ -291,9 +257,10 @@ class KeyboardService : InputMethodService() {
         var longHandled = false
         var touchHandled = false
         var touchCancelled = false
+        var activePointerId = MotionEvent.INVALID_POINTER_ID
         val alternateKey = tense[key] ?: shiftedMedials[key]
         val longAction = Runnable {
-            if (alternateKey != null && !english && !symbols && !clipboardMode) {
+            if (alternateKey != null && !english && !symbols) {
                 longHandled = true
                 showPreview(face, alternateKey)
             }
@@ -301,16 +268,39 @@ class KeyboardService : InputMethodService() {
         face.setOnTouchListener { view, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    activePointerId = event.getPointerId(0)
                     longHandled = false
                     touchHandled = false
                     touchCancelled = false
+                    view.parent?.requestDisallowInterceptTouchEvent(true)
                     view.isPressed = true
+                    handler.removeCallbacks(longAction)
                     handler.postDelayed(longAction, 430)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val slop = dp(8).toFloat()
-                    if (event.x < -slop || event.y < -slop || event.x > view.width + slop || event.y > view.height + slop) {
+                    val pointerIndex = event.findPointerIndex(activePointerId)
+                    if (pointerIndex < 0) {
+                        touchCancelled = true
+                        handler.removeCallbacks(longAction)
+                        hidePreview()
+                        view.isPressed = false
+                    } else {
+                        val slop = dp(12).toFloat()
+                        val x = event.getX(pointerIndex)
+                        val y = event.getY(pointerIndex)
+                        if (x < -slop || y < -slop || x > view.width + slop || y > view.height + slop) {
+                            touchCancelled = true
+                            handler.removeCallbacks(longAction)
+                            hidePreview()
+                            view.isPressed = false
+                        }
+                    }
+                    true
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> true
+                MotionEvent.ACTION_POINTER_UP -> {
+                    if (event.getPointerId(event.actionIndex) == activePointerId) {
                         touchCancelled = true
                         handler.removeCallbacks(longAction)
                         hidePreview()
@@ -322,20 +312,28 @@ class KeyboardService : InputMethodService() {
                     handler.removeCallbacks(longAction)
                     hidePreview()
                     view.isPressed = false
-                    val slop = dp(8).toFloat()
-                    val insideExpandedBounds = event.x >= -slop && event.y >= -slop && event.x <= view.width + slop && event.y <= view.height + slop
+                    val pointerIndex = event.findPointerIndex(activePointerId)
+                    val slop = dp(12).toFloat()
+                    val insideExpandedBounds = pointerIndex >= 0 &&
+                        event.getX(pointerIndex) >= -slop && event.getY(pointerIndex) >= -slop &&
+                        event.getX(pointerIndex) <= view.width + slop &&
+                        event.getY(pointerIndex) <= view.height + slop
                     if (!touchHandled && !touchCancelled && insideExpandedBounds) {
                         touchHandled = true
                         playClick()
                         onKeyPressed(if (longHandled) alternateKey ?: key else key)
                     }
+                    activePointerId = MotionEvent.INVALID_POINTER_ID
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
                     true
                 }
-                MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_POINTER_DOWN -> {
+                MotionEvent.ACTION_CANCEL -> {
                     handler.removeCallbacks(longAction)
                     hidePreview()
                     view.isPressed = false
                     touchCancelled = true
+                    activePointerId = MotionEvent.INVALID_POINTER_ID
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
                     true
                 }
                 else -> true
@@ -381,18 +379,11 @@ class KeyboardService : InputMethodService() {
             key.matches(Regex("[1-3]/3")) -> { symbolPage = (symbolPage + 1) % symbolPages.size; setInputView(buildKeyboard()) }
             key == "‹" -> { symbolPage = (symbolPage - 1 + symbolPages.size) % symbolPages.size; setInputView(buildKeyboard()) }
             key == "›" -> { symbolPage = (symbolPage + 1) % symbolPages.size; setInputView(buildKeyboard()) }
-            key == "📋" -> { captureClipboard(); clipboardMode = true; setInputView(buildKeyboard()) }
-            key == "닫기" -> { clipboardMode = false; setInputView(buildKeyboard()) }
-            key.startsWith("clip:") -> {
-                val index = key.substringAfter(":").toIntOrNull()
-                val value = index?.let { clipboardHistory.getOrNull(it) }
-                if (value != null) { finishComposition(ic); ic.commitText(value, 1); clipboardMode = false; setInputView(buildKeyboard()) }
-            }
             key == "⌫" -> deleteOne(ic)
-            key == "?123" -> { finishComposition(ic); symbols = true; clipboardMode = false; symbolPage = 0; setInputView(buildKeyboard()) }
-            key == "가나다" -> { finishComposition(ic); symbols = false; clipboardMode = false; setInputView(buildKeyboard()) }
+            key == "?123" -> { finishComposition(ic); symbols = true; symbolPage = 0; setInputView(buildKeyboard()) }
+            key == "가나다" -> { finishComposition(ic); symbols = false; setInputView(buildKeyboard()) }
             key == "한/영" -> {
-                finishComposition(ic); english = !english; symbols = false; clipboardMode = false; shifted = false
+                finishComposition(ic); english = !english; symbols = false; shifted = false
                 setInputView(buildKeyboard())
             }
             key == "space" -> { finishComposition(ic); ic.commitText(" ", 1) }
@@ -416,32 +407,6 @@ class KeyboardService : InputMethodService() {
                 }
             }
         }
-    }
-
-    private fun loadClipboardHistory() {
-        clipboardHistory.clear()
-        val saved = getSharedPreferences("keyboard_clipboard", MODE_PRIVATE).getString("items", "[]") ?: "[]"
-        try {
-            val array = JSONArray(saved)
-            for (i in 0 until array.length()) array.optString(i).takeIf { it.isNotBlank() }?.let { clipboardHistory.add(it) }
-        } catch (_: Exception) { clipboardHistory.clear() }
-    }
-
-    private fun saveClipboardHistory() {
-        val array = JSONArray()
-        clipboardHistory.forEach { array.put(it) }
-        getSharedPreferences("keyboard_clipboard", MODE_PRIVATE).edit().putString("items", array.toString()).apply()
-    }
-
-    private fun captureClipboard() {
-        val clip = clipboardManager?.primaryClip ?: return
-        if (clip.itemCount == 0) return
-        val value = clip.getItemAt(0).coerceToText(this)?.toString()?.trim().orEmpty()
-        if (value.isBlank()) return
-        clipboardHistory.remove(value)
-        clipboardHistory.add(0, value)
-        while (clipboardHistory.size > 20) clipboardHistory.removeAt(clipboardHistory.lastIndex)
-        saveClipboardHistory()
     }
 
     private fun typeJamo(char: String, ic: InputConnection) {
