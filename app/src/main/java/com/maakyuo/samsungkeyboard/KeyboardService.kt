@@ -128,40 +128,42 @@ class KeyboardService : InputMethodService() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(7), 0, dp(5), dp(5))
         }
-        banner.addView(TextView(this).apply {
+        val title = TextView(this).apply {
             text = "TOP SECRET  /  LEVEL 7"
-            textSize = 10f; letterSpacing = .12f
+            textSize = 10f
+            letterSpacing = .12f
             setTextColor(Color.rgb(255,137,174))
             typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
-        }, LinearLayout.LayoutParams(0, dp(25), 1f))
+        }
+        banner.addView(title, LinearLayout.LayoutParams(0, dp(25), 1f))
         banner.addView(TextView(this).apply {
-            text = "NANA  •  🐰"; textSize = 10f
-            setTextColor(Color.rgb(255,180,202)); typeface = Typeface.DEFAULT_BOLD
+            text = "NANA  •  🐰"
+            textSize = 10f
+            setTextColor(Color.rgb(255,180,202))
+            typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
         })
         root.addView(banner)
-
-        addRow(root, numberRow, 0)
+        addStyledRow(root, numberRow, 0, 0)
         val rows = when {
             symbols -> symbolRows
             english -> englishRows
             else -> koreanRows
         }
-        rows.forEachIndexed { index, keys -> addRow(root, keys, index + 1) }
+        rows.forEachIndexed { rowIndex, keys -> addStyledRow(root, keys, rowIndex + 1, rowIndex) }
         val bottom = if (symbols) listOf("가나다",",","한/영","space",".","↵")
             else listOf("?123",",","한/영","space",".","↵")
-        addRow(root, bottom, 4)
+        addStyledRow(root, bottom, 4, 4)
         return root
     }
 
-    private fun addRow(root: LinearLayout, keys: List<String>, rowIndex: Int) {
+    private fun addStyledRow(root: LinearLayout, keys: List<String>, rowIndex: Int, decorationRow: Int) {
         val line = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            if (rowIndex == 2) setPadding(dp(8), dp(2), dp(8), dp(2))
-            else setPadding(0, dp(2), 0, dp(2))
+            setPadding(if (rowIndex == 2) dp(8) else 0, dp(2), if (rowIndex == 2) dp(8) else 0, dp(2))
         }
-        keys.forEachIndexed { index, key ->
+        keys.forEachIndexed { keyIndex, key ->
             val modifier = key in listOf("⇧","⌫","?123","↵","한/영","가나다")
             val weight = when (key) {
                 "space" -> 2.65f
@@ -170,60 +172,61 @@ class KeyboardService : InputMethodService() {
                 "⇧","⌫","↵" -> 1.22f
                 else -> 1f
             }
-            val height = if (rowIndex == 4) 43 else 47
-            line.addView(makeKey(key, modifier), LinearLayout.LayoutParams(0, dp(height), weight).apply {
+            val keyHeight = if (rowIndex == 4) 43 else 47
+            line.addView(makeKey(key, modifier, decorationRow, keyIndex), LinearLayout.LayoutParams(0, dp(keyHeight), weight).apply {
                 setMargins(dp(2), dp(2), dp(2), dp(2))
             })
         }
         root.addView(line)
     }
 
-    private fun makeKey(key: String, modifier: Boolean): View {
-        val isDark = modifier
+    private fun makeKey(key: String, modifier: Boolean, row: Int, index: Int): View {
+        val dark = modifier || key in listOf("🔫","🐰")
         val label = when (key) {
             "space" -> if (english) "English" else "한글"
             "⇧" -> if (shifted) "⬆" else "⇧"
             else -> key.trim()
         }
-        val normalBg = if (isDark) Color.rgb(35,34,39) else Color.rgb(248,247,244)
         val face = FrameLayout(this).apply {
-            background = shape(normalBg, if (modifier) 7 else 6,
-                if (isDark) Color.rgb(92,77,88) else Color.rgb(218,210,207), 1)
+            background = shape(
+                if (dark) Color.rgb(35,34,39) else Color.rgb(248,247,244),
+                if (modifier) 7 else 6,
+                if (dark) Color.rgb(92,77,88) else Color.rgb(218,210,207),
+                1
+            )
             elevation = dp(if (modifier) 1 else 2).toFloat()
         }
-        face.tag = normalBg
         val text = TextView(this).apply {
-            this.text = label; gravity = Gravity.CENTER
+            this.text = label
+            gravity = Gravity.CENTER
             textSize = when (key) { "space" -> 10f; "?123","한/영","가나다" -> 11f; else -> 17f }
-            setTextColor(if (isDark) Color.rgb(255,151,184) else Color.rgb(37,36,40))
-            typeface = Typeface.create(if (isDark) "sans-serif-medium" else "sans-serif",
-                if (isDark) Typeface.BOLD else Typeface.NORMAL)
+            setTextColor(if (dark) Color.rgb(255,151,184) else Color.rgb(37,36,40))
+            typeface = Typeface.create(if (dark) "sans-serif-medium" else "sans-serif", if (dark) Typeface.BOLD else Typeface.NORMAL)
         }
         face.addView(text, FrameLayout.LayoutParams(-1, -1))
-        if (!isDark && key !in listOf("space",",",".")) {
-            face.addView(TextView(this).apply {
-                this.text = listOf("·","✦","／","•","✧")[(key.hashCode().absoluteValueSafe()) % 5]
+        if (!dark && key !in listOf("space",",",".")) {
+            val fleck = TextView(this).apply {
+                this.text = listOf("·","✦","／","•","✧")[(row * 3 + index) % 5]
                 textSize = 10f
-                setTextColor(Color.rgb(237,105,145))
+                setTextColor(listOf(Color.rgb(237,105,145),Color.rgb(111,180,215),Color.rgb(239,193,93))[(row + index) % 3])
                 gravity = Gravity.TOP or Gravity.END
                 setPadding(0, dp(1), dp(3), 0)
-            }, FrameLayout.LayoutParams(-1, -1))
+            }
+            face.addView(fleck, FrameLayout.LayoutParams(-1, -1))
         }
         var longHandled = false
         val longAction = Runnable {
             val alternate = tense[key]
             if (alternate != null && !english && !symbols) {
                 longHandled = true
-                longPressed = true
                 showPreview(face, alternate)
-                face.background = shape(Color.rgb(255,224,235), 6, Color.rgb(235,112,151), 2)
             }
         }
         face.setOnTouchListener { view, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    longHandled = false; longPressed = false; pressedKey = key
-                    view.background = shape(Color.rgb(255,224,235), 6, Color.rgb(235,112,151), 2)
+                    longHandled = false
+                    view.isPressed = true
                     showPreview(face, label)
                     handler.postDelayed(longAction, 430)
                     true
@@ -231,17 +234,15 @@ class KeyboardService : InputMethodService() {
                 MotionEvent.ACTION_UP -> {
                     handler.removeCallbacks(longAction)
                     hidePreview()
-                    view.background = shape(normalBg, if (modifier) 7 else 6,
-                        if (isDark) Color.rgb(92,77,88) else Color.rgb(218,210,207), 1)
+                    view.isPressed = false
                     playClick()
-                    if (longHandled && tense[key] != null) onKeyPressed(tense[key]!!)
-                    else if (!longHandled) onKeyPressed(key)
+                    if (longHandled) onKeyPressed(tense[key] ?: key) else onKeyPressed(key)
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    handler.removeCallbacks(longAction); hidePreview()
-                    view.background = shape(normalBg, if (modifier) 7 else 6,
-                        if (isDark) Color.rgb(92,77,88) else Color.rgb(218,210,207), 1)
+                    handler.removeCallbacks(longAction)
+                    hidePreview()
+                    view.isPressed = false
                     true
                 }
                 else -> true
