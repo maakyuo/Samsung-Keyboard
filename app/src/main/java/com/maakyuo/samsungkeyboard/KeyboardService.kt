@@ -65,7 +65,7 @@ class KeyboardService : InputMethodService() {
     private val symbolPages = listOf(
         listOf(
             listOf("@","#","$","%","&","-","+","(",")","/"),
-            listOf("*","\\"","'",":",";","!","?","=","_"),
+            listOf("*","\"","'",":",";","!","?","=","_"),
             listOf("‹","\\","~","<",">","[","]","{","}","›")
         ),
         listOf(
