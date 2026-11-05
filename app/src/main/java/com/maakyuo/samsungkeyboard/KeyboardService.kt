@@ -189,7 +189,7 @@ class KeyboardService : InputMethodService() {
                 }
                 root.addView(empty, LinearLayout.LayoutParams(-1, 0, 1f))
             } else {
-                clipboardHistory.take(5).forEachIndexed { index, value ->
+                clipboardHistory.take(4).forEachIndexed { index, value ->
                     val item = makeKey("clip:$index", false, 0, index)
                     root.addView(item, LinearLayout.LayoutParams(-1, 0, 1f).apply {
                         setMargins(dp(3), dp(2), dp(3), dp(2))
@@ -201,7 +201,7 @@ class KeyboardService : InputMethodService() {
         }
         addStyledRow(root, numberRow, 0, 0)
         val rows = when {
-            symbols -> symbolPages[symbolPage]
+            symbols -> symbolPages[symbolPage].map { if (it == "‹") "${symbolPage + 1}/3" else if (it == "›") "⌫" else it }
             english -> englishRows
             else -> koreanRows
         }
@@ -219,14 +219,13 @@ class KeyboardService : InputMethodService() {
             setPadding(if (rowIndex == 2) dp(8) else 0, dp(2), if (rowIndex == 2) dp(8) else 0, dp(2))
         }
         keys.forEachIndexed { keyIndex, key ->
-            val modifier = key in listOf("⇧","⌫","?123","↵","한/영","가나다","‹","›","📋","닫기") || key.startsWith("clip:")
+            val modifier = key in listOf("⇧","⌫","?123","↵","한/영","가나다","‹","›","📋","닫기") || key.matches(Regex("[1-3]/3")) || key.startsWith("clip:")
             val weight = when (key) {
                 "space" -> 2.65f
                 "한/영" -> 1.15f
                 "?123","가나다" -> 1.18f
                 "⇧","⌫","↵","‹","›","📋","닫기" -> 1.22f
                 else -> if (key.matches(Regex("[1-3]/3"))) 1.22f else 1f
-                else -> 1f
             }
             val keyHeight = if (rowIndex == 4) 43 else 39
             line.addView(makeKey(key, modifier, decorationRow, keyIndex), LinearLayout.LayoutParams(0, dp(keyHeight), weight).apply {
@@ -240,7 +239,7 @@ class KeyboardService : InputMethodService() {
         val dark = modifier || key in listOf("🔫","🐰")
         val label = when (key) {
             "space" -> if (english) "English" else "한글"
-            "⇧" -> if (shifted) "⬆" else "⇧"
+            "⇧" -> if (shifted) "⇪" else "⇧"
             else -> if (key.startsWith("clip:")) clipboardHistory.getOrNull(key.substringAfter(":").toIntOrNull() ?: -1)?.take(34) ?: "" else key.trim()
         }
         val face = FrameLayout(this).apply {
@@ -257,7 +256,7 @@ class KeyboardService : InputMethodService() {
         val text = TextView(this).apply {
             this.text = label
             gravity = Gravity.CENTER
-            textSize = when (key) { "space" -> 10f; "?123","한/영","가나다" -> 11f; else -> 17f }
+            textSize = when (key) { "space" -> 10f; "?123","한/영","가나다" -> 11f; else -> if (key.matches(Regex("[1-3]/3"))) 13f else 17f }
             setTextColor(if (dark) Color.rgb(255,151,184) else Color.rgb(37,36,40))
             typeface = Typeface.create(if (dark) "sans-serif-medium" else "sans-serif", if (dark) Typeface.BOLD else Typeface.NORMAL)
         }
@@ -343,6 +342,7 @@ class KeyboardService : InputMethodService() {
                 if (symbols) symbolPage = (symbolPage + 1) % symbolPages.size else shifted = !shifted
                 setInputView(buildKeyboard())
             }
+            key.matches(Regex("[1-3]/3")) -> { symbolPage = (symbolPage + 1) % symbolPages.size; setInputView(buildKeyboard()) }
             key == "‹" -> { symbolPage = (symbolPage - 1 + symbolPages.size) % symbolPages.size; setInputView(buildKeyboard()) }
             key == "›" -> { symbolPage = (symbolPage + 1) % symbolPages.size; setInputView(buildKeyboard()) }
             key == "📋" -> { captureClipboard(); clipboardMode = true; setInputView(buildKeyboard()) }
