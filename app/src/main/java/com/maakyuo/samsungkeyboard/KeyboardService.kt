@@ -98,10 +98,10 @@ class KeyboardService : InputMethodService() {
     private fun press(key: String) {
         val ic = currentInputConnection ?: return
         when (key) {
-            "⇧" -> { shifted = !shifted; inputView = buildKeyboard() }
+            "⇧" -> { shifted = !shifted; setInputView(buildKeyboard()) }
             "⌫" -> backspace(ic)
-            "?123" -> { commitComposing(ic); symbols = true; inputView = buildKeyboard() }
-            "가나다" -> { symbols = false; inputView = buildKeyboard() }
+            "?123" -> { commitComposing(ic); symbols = true; setInputView(buildKeyboard()) }
+            "가나다" -> { symbols = false; setInputView(buildKeyboard()) }
             "한/영" -> { commitComposing(ic); requestHideSelf(0) }
             "space" -> { commitComposing(ic); ic.commitText(" ", 1) }
             "↵" -> { commitComposing(ic); val action = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION) ?: EditorInfo.IME_ACTION_NONE; if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) ic.performEditorAction(action) else ic.commitText("\n",1) }
@@ -121,7 +121,7 @@ class KeyboardService : InputMethodService() {
         if (next == null) { commitComposing(ic); composing = k }
         else composing = next
         ic.setComposingText(composing, 1)
-        if (shifted) { shifted = false; inputView = buildKeyboard() }
+        if (shifted) { shifted = false; setInputView(buildKeyboard()) }
     }
 
     private fun composeNext(old: String, next: String): String? {
@@ -151,7 +151,7 @@ class KeyboardService : InputMethodService() {
                 }
                 val final = finalIndex[ti]
                 val split = finalPairs.entries.firstOrNull { it.value == final }
-                val moved = split?.key?.last() ?: final
+                val moved = split?.key?.last()?.toString() ?: final
                 val remain = split?.key?.first()?.toString() ?: ""
                 val base = remain.ifEmpty { "" }
                 val syllable = if (remain.isEmpty()) old.dropLast(1) else old.dropLast(1) + (0xAC00 + (li * 21 + vi) * 28 + finalIndex.indexOf(remain)).toChar()
