@@ -19,22 +19,23 @@ class SettingsActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(36, 64, 36, 36)
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.rgb(255,239,247), Color.rgb(239,232,255)))
+            setPadding(30, 58, 30, 30)
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.rgb(34,32,38), Color.rgb(66,42,54)))
         }
         root.addView(TextView(this).apply {
             text = "하나코 나나 키보드"
             textSize = 25f
-            setTextColor(Color.rgb(91,61,91))
+            setTextColor(Color.rgb(255,153,185))
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
         })
         root.addView(TextView(this).apply {
-            text = "나만의 귀여운 자판으로 입력해 보세요."
-            textSize = 14f
-            setTextColor(Color.rgb(125,96,126))
+            text = "TOP SECRET  /  LEVEL 7\nAGENT NANA"
+            textSize = 12f
+            setTextColor(Color.rgb(255,211,222))
             gravity = Gravity.CENTER
-            setPadding(0, 12, 0, 36)
+            letterSpacing = .12f
+            setPadding(0, 12, 0, 38)
         })
         root.addView(actionButton("키보드 사용 설정") { startActivity(Intent("android.settings.INPUT_METHOD_SETTINGS")) })
         root.addView(actionButton("키보드 선택") { (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showInputMethodPicker() })
@@ -45,14 +46,14 @@ class SettingsActivity : Activity() {
         text = caption
         isAllCaps = false
         textSize = 16f
-        setTextColor(Color.WHITE)
+        setTextColor(Color.rgb(255,239,244))
         background = GradientDrawable().apply {
-            cornerRadius = 28f
-            setColor(Color.rgb(210,153,190))
+            cornerRadius = 20f
+            setColor(Color.rgb(173,69,111))
+            setStroke(1, Color.rgb(255,157,189))
         }
         setPadding(28, 14, 28, 14)
         setOnClickListener { action() }
-        val params = LinearLayout.LayoutParams(-1, 58).apply { bottomMargin = 16 }
-        layoutParams = params
+        layoutParams = LinearLayout.LayoutParams(-1, 58).apply { bottomMargin = 16 }
     }
 }
