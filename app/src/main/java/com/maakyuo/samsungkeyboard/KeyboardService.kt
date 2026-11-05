@@ -205,7 +205,7 @@ class KeyboardService : InputMethodService() {
 
         fun restoreKeyFace(view: View) {
             view.animate().cancel()
-            view.animate().scaleX(1f).scaleY(1f).translationY(0f).setDuration(90).start()
+            view.animate().scaleX(1f).scaleY(1f).translationY(0f).setDuration(125).start()
         }
         fun dispatchOnce(session: PressSession, view: View, value: String) {
             if (session.dispatched) return
@@ -236,8 +236,8 @@ class KeyboardService : InputMethodService() {
                     activeSession = session
                     view.parent?.requestDisallowInterceptTouchEvent(true)
                     view.animate().cancel()
-                    view.animate().scaleX(0.94f).scaleY(0.94f)
-                        .translationY(dp(1).toFloat()).setDuration(55).start()
+                    view.animate().scaleX(0.78f).scaleY(0.78f)
+                        .translationY(dp(4).toFloat()).setDuration(45).start()
 
                     session.fallback = Runnable {
                         if (activeSession === session && !session.dispatched) dispatchOnce(session, view, key)
@@ -313,8 +313,11 @@ class KeyboardService : InputMethodService() {
             setStroke(dp(strokeWidth), stroke)
         }
 
-    private fun onKeyPressed(key: String) {
-        val ic = currentInputConnection ?: return
+    private fun onKeyPressed(key: String, attempt: Int = 0) {
+        val ic = currentInputConnection ?: run {
+            if (attempt < 12) handler.postDelayed({ onKeyPressed(key, attempt + 1) }, 40L)
+            return
+        }
         when {
             key == "⇧" -> {
                 if (symbols) symbolPage = (symbolPage + 1) % symbolPages.size else shifted = !shifted
