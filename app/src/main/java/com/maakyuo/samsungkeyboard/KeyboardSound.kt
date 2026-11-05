@@ -59,7 +59,7 @@ object KeyboardSound {
         var seed = 0x13579B + profile * 7919
         for (i in samples.indices) {
             val t = i.toDouble() / RATE
-            val attack = (i / (RATE * 0.0015)).coerceAtMost(1).toDouble()
+            val attack = (i / (RATE * 0.0015)).coerceAtMost(1.0)
             val decay = exp(-t * (36.0 + profile % 7 * 5.0))
             seed = seed * 1103515245 + 12345
             val noise = (((seed ushr 16) and 0x7fff) / 16384.0 - 1.0)
