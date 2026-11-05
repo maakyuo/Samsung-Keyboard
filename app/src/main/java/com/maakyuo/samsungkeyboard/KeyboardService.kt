@@ -201,7 +201,13 @@ class KeyboardService : InputMethodService() {
         }
         addStyledRow(root, numberRow, 0, 0)
         val rows = when {
-            symbols -> symbolPages[symbolPage].map { if (it == "‹") "${symbolPage + 1}/3" else if (it == "›") "⌫" else it }
+            symbols -> symbolPages[symbolPage].map { row ->
+                row.map { key -> when (key) {
+                    "‹" -> "${symbolPage + 1}/3"
+                    "›" -> "⌫"
+                    else -> key
+                } }
+            }
             english -> englishRows
             else -> koreanRows
         }
